@@ -81,11 +81,17 @@ while True:
         if not success:
             print("Failed to capture image from webcam")
             break
+        
+        # Flip the image horizontally for mirror effect
+        img = cv2.flip(img, 1)
     else:
         # Load image from URL
         img_resp = urllib.request.urlopen(url)
         imgnp = np.array(bytearray(img_resp.read()), dtype=np.uint8)
         img = cv2.imdecode(imgnp, -1)
+        
+        # Flip the image horizontally for mirror effect
+        img = cv2.flip(img, 1)
 
     # Resize and convert the image
     imgS = cv2.resize(img, (0, 0), None, 0.25, 0.25)
