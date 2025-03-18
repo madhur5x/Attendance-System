@@ -6,6 +6,7 @@ import os
 import pickle
 import face_recognition
 import matplotlib.pyplot as plt
+from collections import Counter
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
@@ -122,7 +123,8 @@ def markAttendance(name, course, year, batch):
 print('Encoding Complete')
 
 # ================== Accuracy Test Mode ==================
-test_mode = True  # Set to True to run accuracy test, False for real-time attendance
+
+test_mode = False # Set to True to run accuracy test, False for real-time attendance
 test_path = r'C:\Users\madhu\OneDrive\Desktop\Attendance\test_images'  # Update this path
 
 if test_mode:
@@ -277,7 +279,7 @@ if test_mode:
             ax = fig.add_subplot(gs[0, 0])
             
             # Initial display range - adjust visible matrix part size based on number of classes
-            display_size = min(20, num_classes)  # Start with at most 15 classes
+            display_size = min(15, num_classes)  # Start with at most 15 classes
             current_start = 0
             
             # Function to update the matrix display
@@ -306,6 +308,14 @@ if test_mode:
                 for i in range(len(visible_cm)):
                     if visible_cm[i, i] > 0:
                         ax.add_patch(plt.Rectangle((i, i), 1, 1, fill=False, edgecolor='green', lw=2))
+                
+                # Add accuracy percentages to diagonal elements
+                for i in range(len(visible_cm)):
+                    if i + start_idx < len(row_sums):
+                        if visible_cm[i, i] > 0 and row_sums[i + start_idx] > 0:
+                            accuracy = visible_cm[i, i] / row_sums[i + start_idx]
+                            ax.text(i + 0.5, i + 0.85, f"{accuracy:.1%}", 
+                                   ha="center", va="center", fontsize=7, color="green", fontweight="bold")
                 
                 ax.set_xlabel('Predicted', fontsize=12)
                 ax.set_ylabel('True', fontsize=12)
@@ -379,9 +389,21 @@ if test_mode:
                 
                 precision_values.append(t_precision)
                 recall_values.append(t_recall)
+                f1_values.append(t_f1)
                 
             ax.plot(thresholds, precision_values, 'b-', label='Precision')
             ax.plot(thresholds, recall_values, 'g-', label='Recall')
+            ax.plot(thresholds, f1_values, 'r-', label='F1 Score')
+            
+            # Find the threshold with the best F1 score
+            best_f1_idx = np.argmax(f1_values)
+            best_threshold = thresholds[best_f1_idx]
+            best_f1 = f1_values[best_f1_idx]
+            
+            # Highlight the best threshold
+            ax.axvline(x=best_threshold, color='black', linestyle='--', alpha=0.7)
+            ax.text(best_threshold + 0.01, 0.5, f'Best Threshold: {best_threshold:.2f}\nF1: {best_f1:.2f}', 
+                   fontsize=9, verticalalignment='center')
             
             ax.set_title('Performance Metrics at Different Confidence Thresholds', fontsize=14)
             ax.set_xlabel('Confidence Threshold')
@@ -401,20 +423,50 @@ if test_mode:
         plt.show()
 
         # 2) Scrollable Confusion Matrix (allowing to see all classes)
-        plt.figure()
-        fig2 = plt.figure(figsize=(10, 8))
+        fig2 = plt.figure(figsize=(12, 10))
         slider = plot_scrollable_confusion_matrix(fig2, y_true, y_pred, student_names)
         plt.tight_layout()
         plt.show()
 
         # 3) Threshold Analysis (Precision, Recall & F1)
-        plt.figure()
         fig3, ax3 = plt.subplots(figsize=(10, 6))
         plot_threshold_analysis(ax3)
+        plt.tight_layout()
         plt.show()
 
+        # Print detailed classification report
+        print("\n===== DETAILED CLASSIFICATION REPORT =====")
+        valid_indices = [i for i, pred in enumerate(y_pred) if pred != "NO_FACE" and pred != "ERROR"]
+        if valid_indices:
+            filtered_y_true = [y_true[i] for i in valid_indices]
+            filtered_y_pred = [y_pred[i] for i in valid_indices]
+            print(classification_report(filtered_y_true, filtered_y_pred))
+            
+            # Print optimal threshold recommendation
+            print("\n===== OPTIMAL THRESHOLD RECOMMENDATION =====")
+            thresholds = list(threshold_results.keys())
+            f1_values = []
+            
+            for t in thresholds:
+                t_tp = threshold_results[t]["TP"]
+                t_fp = threshold_results[t]["FP"]
+                t_fn = threshold_results[t]["FN"]
+                t_precision = t_tp / (t_tp + t_fp) if (t_tp + t_fp) > 0 else 0
+                t_recall = t_tp / (t_tp + t_fn) if (t_tp + t_fn) > 0 else 0
+                t_f1 = 2 * (t_precision * t_recall) / (t_precision + t_recall) if (t_precision + t_recall) > 0 else 0
+                f1_values.append(t_f1)
+            
+            best_f1_idx = np.argmax(f1_values)
+            best_threshold = thresholds[best_f1_idx]
+            print(f"Recommended confidence threshold: {best_threshold:.2f} (F1 Score: {f1_values[best_f1_idx]:.3f})")
+            precision_values = [threshold_results[t]["TP"] / (threshold_results[t]["TP"] + threshold_results[t]["FP"]) if (threshold_results[t]["TP"] + threshold_results[t]["FP"]) > 0 else 0 for t in thresholds]
+            recall_values = [threshold_results[t]["TP"] / (threshold_results[t]["TP"] + threshold_results[t]["FN"]) if (threshold_results[t]["TP"] + threshold_results[t]["FN"]) > 0 else 0 for t in thresholds]
+            print(f"At this threshold: Precision = {precision_values[best_f1_idx]:.3f}, Recall = {recall_values[best_f1_idx]:.3f}")
+        else:
+            print("Not enough data for classification report")
+# ================== Real-time Attendance Mode ==================
 else:
-    # ================== Real-time Attendance Mode ==================
+    # Original real-time attendance code
     use_webcam = True  # Set to False to use an image URL
 
     if use_webcam:
@@ -436,6 +488,8 @@ else:
             img_resp = urllib.request.urlopen(url)
             imgnp = np.array(bytearray(img_resp.read()), dtype=np.uint8)
             img = cv2.imdecode(imgnp, -1)
+            
+            # Flip the image horizontally for mirror effect
             img = cv2.flip(img, 1)
 
         # Resize and convert the image
@@ -449,52 +503,33 @@ else:
         for encodeFace, faceLoc in zip(encodesCurFrame, facesCurFrame):
             matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
             faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
-            
-            if len(faceDis) == 0:
-                continue
-                
             matchIndex = np.argmin(faceDis)
-            confidence = 1 - faceDis[matchIndex]  # Convert distance to confidence
 
             if matches[matchIndex]:
                 name, course, year, batch = studentData[matchIndex]
 
-                # Draw rectangle and display details on the face
+                # Draw a rectangle around the face and display details
                 y1, x2, y2, x1 = faceLoc
                 y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
                 cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
-                # Add a background for text
                 cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
-                
-                # Display student info with confidence
-                cv2.putText(img, f'Name: {name} ({confidence:.2f})', (x1 + 6, y1 - 60), 
-                            cv2.FONT_HERSHEY_COMPLEX, 0.8, (255, 255, 255), 2)
-                cv2.putText(img, f'Course: {course}', (x1 + 6, y1 - 35), 
-                            cv2.FONT_HERSHEY_COMPLEX, 0.8, (255, 255, 255), 2)
-                cv2.putText(img, f'Year: {year}', (x1 + 6, y1 - 10), 
-                            cv2.FONT_HERSHEY_COMPLEX, 0.8, (255, 255, 255), 2)
-                cv2.putText(img, f'Batch: {batch}', (x1 + 6, y1 + 15), 
-                            cv2.FONT_HERSHEY_COMPLEX, 0.8, (255, 255, 255), 2)
+                cv2.putText(img, f'Name: {name}', (x1 + 6, y1 - 60), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+                cv2.putText(img, f'Course: {course}', (x1 + 6, y1 - 35), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+                cv2.putText(img, f'Year: {year}', (x1 + 6, y1 - 10), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+                cv2.putText(img, f'Batch: {batch}', (x1 + 6, y1 + 15), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
 
-                markAttendance(name, course, year, batch)  # Mark attendance
-            else:
-                # Display unknown face
-                y1, x2, y2, x1 = faceLoc
-                y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
-                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                cv2.putText(img, "Unknown", (x1 + 6, y1 - 10), 
-                            cv2.FONT_HERSHEY_COMPLEX, 0.8, (255, 255, 255), 2)
+                markAttendance(name, course, year, batch)  # Mark attendance with additional info
 
-        # Show the webcam feed
+        # Display the image with annotations
         cv2.imshow('Webcam', img)
         key = cv2.waitKey(5)
         if key == ord('q'):
             break
 
-    # Clean up resources
+    # Clean up
     if use_webcam:
-        cap.release()
+        cap.release()  # Release the webcam
+
     cv2.destroyAllWindows()
 
 # Inform the user where the Attendance.csv file has been created
